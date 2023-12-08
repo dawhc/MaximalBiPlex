@@ -11,8 +11,7 @@ CTestTestfile.cmake
 _deps
 result*
 test*
-gmon.out
-nohup.out
+*.out
 dataset
 docs
 .cache

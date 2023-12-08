@@ -17,7 +17,7 @@ namespace biplex {
 
 	BiGraph coreReduction(const BiGraph& G, uint32_t alpha, uint32_t beta);
 
-	BiGraph butterflyReduction(const BiGraph& G, uint32_t threshold);
+	BiGraph butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k);
 
 	bool pruneCX(uint32_t u, uint32_t uSide);
 

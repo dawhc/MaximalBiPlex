@@ -16,7 +16,7 @@
 // #define DEBUG
 #define UPPERBOUND_PRUNE
 // #define CALC_DEGREE
-#define SMALL_K 2
+#define SMALL_K 1
 // #define DESTRUCT_SETS // accelerate dataset "dblp"
 #define PRUNE_C
 #define PRUNE_ONCE
@@ -26,7 +26,7 @@
 // #define NO_ORDERING
 // #define CHOOSE_FIRST_VERTEX
 #define CORE_REDUCTION
-#define BUTTERFLY_REDUCTION
+#define BUTTERFLY_REDUCTION_VERSION 3
 
 #define STRINGIFY(name) #name
 
@@ -44,7 +44,7 @@ namespace biplex {
 	std::vector<std::vector<uint32_t>> nonNbrS[2];
 	std::vector<uint32_t> nonNbrC;
 	std::vector<uint32_t> degC[2];
-	std::vector<uint32_t> ordered[2], order[2];
+	std::vector<uint32_t> ordered[2], order[2], core[2];
 	std::vector<uint32_t> sup, ptrB;
 	std::vector<std::vector<uint32_t>> B;
 	uint32_t q, k, lb;
@@ -106,6 +106,7 @@ void biplex::coreOrdering(const BiGraph& G) {
 	for (uint32_t side = 0; side <= 1; ++side) {
 		order[side].resize(G.n[side]);
 		ordered[side].resize(G.n[side]);
+		core[side].resize(G.n[side]);
 	}
 
 	uint32_t nOrdered[2] = {0};
@@ -125,6 +126,7 @@ void biplex::coreOrdering(const BiGraph& G) {
 
 		ordered[side][nOrdered[side]] = u;
 		order[side][u] = nOrdered[side]++;
+		core[side][u] = vHeap[u];
 	}
 
 }
@@ -183,9 +185,174 @@ BiGraph biplex::coreReduction(const BiGraph& G, uint32_t alpha, uint32_t beta) {
 /**
  * Butterfly-based reduction
  */
-BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t threshold) {
+
+#if (BUTTERFLY_REDUCTION_VERSION == 3)
+
+BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k) {
+
+	std::vector<uint32_t> cn(G.n[0]), deg[2] = {G.degree[0], G.degree[1]};
+	std::vector<bool> rmv[2] = {std::vector<bool>(G.n[0]), std::vector<bool>(G.n[1])};
+	std::vector<CuckooHash> rme(G.n[0]);
+
+	coreOrdering(G);
+	for (uint32_t i = 0; i < G.n[0]; ++i) {
+		uint32_t u = ordered[0][i];
+		uint32_t cntv = 0;
+
+		for (uint32_t v : G.nbr[0][u]) if (!rmv[1][v]) 
+			for (uint32_t w : G.nbr[1][v]) if (!rmv[0][w])
+				cn[w] = 0;
+			
+		for (uint32_t v : G.nbr[0][u]) if (!rmv[1][v]) 
+			for (uint32_t w : G.nbr[1][v]) if (!rmv[0][w])
+				++cn[w];
+
+		for (uint32_t v : G.nbr[0][u]) if (!rmv[1][v]) {
+			uint32_t cntw = 0;
+			for (uint32_t w : G.nbr[1][v]) 
+				if (!rmv[0][w] && cn[w] >= q-2*k) 
+					++cntw;
+			if (cntw >= q-k) ++cntv;
+			else rme[u].insert(v);
+		}
+		if (cntv < q-k) {
+			rmv[0][u] = true;
+			for (uint32_t v : G.nbr[0][u])
+				if (--deg[1][v] < q-k) 
+					rmv[1][v] = true;
+		}
+	}
+
+	BiGraph newG;
+	for (uint32_t u = 0; u < G.n[0]; ++u) if (!rmv[0][u])
+		for (uint32_t v : G.nbr[0][u]) if (!rmv[1][v] && !rme[u].find(v))
+			newG.addEdgeWithLabel(G.vLabel[0][u], G.vLabel[1][v]);
+
+	return newG;
+
+}
+
+#elif (BUTTERFLY_REDUCTION_VERSION == 2)
+
+BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k) {
+	std::queue<uint32_t> Q;
 	std::vector<std::pair<uint32_t, uint32_t>> edges;
 	std::vector<std::unordered_map<uint32_t, uint32_t>> eid(G.n[0]);
+	std::vector<bool> inq, del;
+
+	uint32_t threshold = (q-k-1) * (q-2*k-1);
+
+	sup.clear();
+
+	coreOrdering(G);
+	uint32_t maxCore[2] = { core[0][ordered[0][G.n[0]-1]], core[1][ordered[1][G.n[1]-1]] };
+	// printf("maxCore = {%d, %d}\n", maxCore[0], maxCore[1]);
+
+	for (uint32_t u = 0; u < G.n[0]; ++u)  {
+		for (uint32_t v : G.nbr[0][u])  {
+			if (core[0][u] >= std::min(maxCore[0], lb) && core[1][v] >= std::min(maxCore[1], lb)) continue;
+			eid[u][v] = edges.size();
+			edges.push_back(std::make_pair(u, v));
+		}
+	}
+
+	sup.resize(edges.size());
+	inq.resize(edges.size());
+	del.resize(edges.size());
+
+	for (uint32_t i = 0; i < edges.size(); ++i) {
+		inq[i] = del[i] = false;
+		sup[i] = 0;
+
+		uint32_t u = edges[i].first, v = edges[i].second;
+
+		for (uint32_t w : G.nbr[1][v]) if (w != u) 
+			for (uint32_t x : G.nbr[0][w]) if (x != v && G.connect(0, u, x)) 
+				++sup[i];
+
+		if (sup[i] < threshold) {
+			inq[i] = true;
+			Q.push(i);
+		}
+	}
+
+
+	while (!Q.empty()) {
+		uint32_t i = Q.front(); Q.pop();
+		inq[i] = false; del[i] = true;
+		uint32_t u = edges[i].first, v = edges[i].second;
+		for (uint32_t w : G.nbr[1][v]) if (w != u) {
+			auto iwv = eid[w].find(v);
+			if (iwv != eid[w].end() && del[iwv->second]) continue;
+			//if (del[iwv->second]) continue;
+			for (uint32_t x : G.nbr[0][w]) if (x != v && G.connect(0, u, x)) {
+				auto iux = eid[u].find(x);
+				auto iwx = eid[w].find(x);
+				//if (del[iux->second] || del[iwx->second]) continue;
+				 if ((iux != eid[u].end() && del[iux->second]) || 
+				 	(iwx != eid[w].end() && del[iwx->second])) continue;
+				if (iux != eid[u].end() && --sup[iux->second] < threshold && !inq[iux->second]) {
+					inq[iux->second] = true;
+					Q.push(iux->second);
+				}
+				if (iwv != eid[w].end() && --sup[iwv->second] < threshold && !inq[iwv->second]) {
+					inq[iwv->second] = true;
+					Q.push(iwv->second);
+				}
+				if (iwx != eid[w].end() && --sup[iwx->second] < threshold && !inq[iwx->second]) {
+					inq[iwx->second] = true;
+					Q.push(iwx->second);
+				}
+			}
+		}
+	}
+
+	BiGraph newG;
+
+	for (uint32_t u = 0; u < G.n[0]; ++u) {
+		for (uint32_t v : G.nbr[0][u]) {
+			auto iter = eid[u].find(v);
+			if (iter == eid[u].end() || (!del[iter->second]))
+			// if (!del[iter->second])
+				newG.addEdgeWithLabel(G.vLabel[0][u], G.vLabel[1][v]);
+		}
+	}
+
+	std::vector<bool> rmv[2] = {std::vector<bool>(G.n[0]), std::vector<bool>(G.n[1])};
+
+	while (true) {
+		bool flagBreak = true;
+		for (uint32_t i = 0; i <= 1; ++i) {
+			for (uint32_t u = 0; u < newG.n[i]; ++u) {
+				if (!rmv[i][u] && newG.degree[i][u] < q-k) {
+					rmv[i][u] = true;
+					flagBreak = false;
+					for (uint32_t v : newG.nbr[i][u])
+						if (!rmv[i^1][v])
+							--newG.degree[i^1][v];
+				}
+			}
+		}
+		if (flagBreak) break;
+	}
+
+	BiGraph newnewG;
+
+	for (uint32_t u = 0; u < newG.n[0]; ++u) if (!rmv[0][u])
+		for (uint32_t v : newG.nbr[0][u]) if (!rmv[1][v])
+			newnewG.addEdgeWithLabel(newG.vLabel[0][u], newG.vLabel[1][v]);
+
+	return newnewG;
+
+}
+
+#else
+
+BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k) {
+	std::vector<std::pair<uint32_t, uint32_t>> edges;
+	std::vector<std::unordered_map<uint32_t, uint32_t>> eid(G.n[0]);
+
+	uint32_t threshold = (q-k-1) * (q-2*k-1);
 
 	for (uint32_t u = 0; u < G.n[0]; ++u)
 		for (uint32_t v : G.nbr[0][u]) {
@@ -243,8 +410,34 @@ BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t threshold) {
 		);
 	}
 
-	return newG;
+	std::vector<bool> rmv[2] = {std::vector<bool>(G.n[0]), std::vector<bool>(G.n[1])};
+
+	while (true) {
+		bool flagBreak = true;
+		for (uint32_t i = 0; i <= 1; ++i) {
+			for (uint32_t u = 0; u < newG.n[i]; ++u) {
+				if (!rmv[i][u] && newG.degree[i][u] < q-k) {
+					rmv[i][u] = true;
+					flagBreak = false;
+					for (uint32_t v : newG.nbr[i][u])
+						if (!rmv[i^1][v])
+							--newG.degree[i^1][v];
+				}
+			}
+		}
+		if (flagBreak) break;
+	}
+
+	BiGraph newnewG;
+
+	for (uint32_t u = 0; u < newG.n[0]; ++u) if (!rmv[0][u])
+		for (uint32_t v : newG.nbr[0][u]) if (!rmv[1][v])
+			newnewG.addEdgeWithLabel(newG.vLabel[0][u], newG.vLabel[1][v]);
+
+	return newnewG;
 }
+
+#endif
 
 bool biplex::pruneCX(uint32_t u, uint32_t uSide) {
 
@@ -459,12 +652,19 @@ biplex::Result biplex::enumeration(const BiGraph& Graph, uint32_t q, uint32_t k,
 
 
 #ifdef CORE_REDUCTION
-	if (lb > k)	
+	if (lb > k)	{
 #else
-	if (false)
+	if (false) {
 #endif
 		// Get the (lb-k, lb-k)-core from G
+		printf("\nStart core reduction\n");
+		printf("Before: m = %d, nL = %d, nR = %d\n", Graph.m, Graph.n[0], Graph.n[1]);
+		auto startTime = std::chrono::steady_clock::now();
 		G = coreReduction(Graph, lb-k, lb-k);
+		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime);
+		printf("After: m = %d, nL = %d, nR = %d\n", G.m, G.n[0], G.n[1]);
+		printf("Time spent for core reduction: %ld ms\n", duration.count());
+	}
 	else 
 		G = std::move(Graph);
 
@@ -482,13 +682,16 @@ biplex::Result biplex::enumeration(const BiGraph& Graph, uint32_t q, uint32_t k,
 	}
 
 	result.numBranches = result.numBiPlexes = 0;
-#ifdef BUTTERFLY_REDUCTION
+#ifdef BUTTERFLY_REDUCTION_VERSION
 	// Butterfly-based reduction
 	if (lb > 2 * k) {
 		printf("\nStart butterfly reduction\n");
 		printf("Before: m = %d, nL = %d, nR = %d\n", G.m, G.n[0], G.n[1]);
-		G = butterflyReduction(G, (lb-k-1)*(lb-2*k-1));
+		auto startTime = std::chrono::steady_clock::now();
+		G = butterflyReduction(G, lb, k);
+		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime);
 		printf("After: m = %d, nL = %d, nR = %d\n", G.m, G.n[0], G.n[1]);
+		printf("Time spent for butterfly reduction: %ld ms\n", duration.count());
 	}
 #endif
 
@@ -693,7 +896,7 @@ void biplex::branchSmallK(uint32_t dep, uint32_t begin, uint32_t u, uint32_t uSi
 
 uint32_t biplex::calcDegree(VertexSet* V, uint32_t u, uint32_t uSide)
 {
-	uint deg = 0;
+	uint32_t deg = 0;
 	if (G.nbr[uSide][u].size() < V[uSide^1].size()) {
 		for (uint32_t v : G.nbr[uSide][u])
 			if (V[uSide^1].inside(v))

@@ -50,16 +50,7 @@ namespace biplex {
 	uint32_t q, k, lb;
 	Result result;
 	uint64_t resultNumThres;
-	std::chrono::time_point<std::chrono::steady_clock> startTime, currTime;
-	uint64_t pivotingTime, bipartiteTime, calcTime;
-
-	void setTime() {
-		currTime = std::chrono::steady_clock::now();
-	}
-
-	void getTime(uint64_t &timeCount) {
-		timeCount += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - currTime).count();
-	}
+	std::chrono::time_point<std::chrono::steady_clock> startTime;
 }
 
 /* Heuristic algorithm */
@@ -190,36 +181,42 @@ BiGraph biplex::coreReduction(const BiGraph& G, uint32_t alpha, uint32_t beta) {
 
 BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k) {
 
-	std::vector<uint32_t> cn(G.n[0]), deg[2] = {G.degree[0], G.degree[1]};
+	std::vector<uint32_t> cn(std::max(G.n[0], G.n[1])), deg[2] = {G.degree[0], G.degree[1]};
 	std::vector<bool> rmv[2] = {std::vector<bool>(G.n[0]), std::vector<bool>(G.n[1])};
 	std::vector<CuckooHash> rme(G.n[0]);
 
 	coreOrdering(G);
-	for (uint32_t i = 0; i < G.n[0]; ++i) {
-		uint32_t u = ordered[0][i];
-		uint32_t cntv = 0;
+	for (uint32_t t = 0; t < 2; ++t)
+	for (uint32_t side = 0; side <= 1; ++side) {
+		for (uint32_t i = 0; i < G.n[side]; ++i) {
+			uint32_t u = ordered[side][i], cntv = 0;
 
-		for (uint32_t v : G.nbr[0][u]) if (!rmv[1][v]) 
-			for (uint32_t w : G.nbr[1][v]) if (!rmv[0][w])
-				cn[w] = 0;
-			
-		for (uint32_t v : G.nbr[0][u]) if (!rmv[1][v]) 
-			for (uint32_t w : G.nbr[1][v]) if (!rmv[0][w])
-				++cn[w];
+			if (rmv[side][u]) continue;
 
-		for (uint32_t v : G.nbr[0][u]) if (!rmv[1][v]) {
-			uint32_t cntw = 0;
-			for (uint32_t w : G.nbr[1][v]) 
-				if (!rmv[0][w] && cn[w] >= q-2*k) 
-					++cntw;
-			if (cntw >= q-k) ++cntv;
-			else rme[u].insert(v);
-		}
-		if (cntv < q-k) {
-			rmv[0][u] = true;
-			for (uint32_t v : G.nbr[0][u])
-				if (--deg[1][v] < q-k) 
-					rmv[1][v] = true;
+			for (uint32_t v : G.nbr[side][u]) if (!rmv[side^1][v]) 
+				for (uint32_t w : G.nbr[side^1][v]) if (!rmv[side][w])
+					cn[w] = 0;
+				
+			for (uint32_t v : G.nbr[side][u]) if (!rmv[side^1][v]) 
+				for (uint32_t w : G.nbr[side^1][v]) if (!rmv[side][w])
+					++cn[w];
+
+			for (uint32_t v : G.nbr[side][u]) if (!rmv[side^1][v]) {
+				uint32_t cntw = 0;
+				for (uint32_t w : G.nbr[side^1][v]) 
+					if (!rmv[side][w] && cn[w] >= q-2*k) 
+						++cntw;
+				if (cntw >= q-k) ++cntv;
+				else if (side == 0) rme[u].insert(v);
+				else rme[v].insert(u);
+			}
+
+			if (cntv < q-k) {
+				rmv[side][u] = true;
+				for (uint32_t v : G.nbr[side][u])
+					if (--deg[side^1][v] < q-k) 
+						rmv[side^1][v] = true;
+			}
 		}
 	}
 
@@ -637,8 +634,6 @@ biplex::Result biplex::enumeration(const BiGraph& Graph, uint32_t q, uint32_t k,
 	biplex::lb = q;// std::max(biplexLowerBound(Graph), q);
 	biplex::resultNumThres = resultNum;
 
-	pivotingTime = bipartiteTime = calcTime = 0;
-
 	printf("\nMacro Info:\n");
 	PRINT_MACRO_INFO(DEBUG);
 	PRINT_MACRO_INFO(CALC_DEGREE);
@@ -669,7 +664,7 @@ biplex::Result biplex::enumeration(const BiGraph& Graph, uint32_t q, uint32_t k,
 		G = std::move(Graph);
 
 	// Resize sets
-	std::vector<std::vector<uint32_t>>(k+1, std::vector<uint32_t>(G.n[1])).swap(B);
+	std::vector<std::vector<uint32_t>>(k+1, std::vector<uint32_t>(std::max(G.n[0], G.n[1]))).swap(B);
 	std::vector<uint32_t>(std::max(G.n[0], G.n[1])).swap(sup);	
 
 	for (uint32_t side = 0; side <= 1; ++side) {
@@ -795,6 +790,8 @@ uint32_t biplex::biplexUpperBound(uint32_t u, uint32_t uSide)
 		for (uint32_t w : C[uSide^1]) {
 			if (!G.connect(uSide, u, w)) continue;
 			uint32_t s = nonNbrS[uSide^1][w].size();
+			if (ptrB[s] >= B[s].size())
+				printf("i=%d size=%d\n", ptrB[s], B[s].size());
 			B[s][ptrB[s]++] = w;
 		}
 	}
@@ -1127,7 +1124,6 @@ void biplex::branchNew(uint32_t dep)
 		uint32_t u = -1;
 		int32_t deg_u = G.n[side], nonDegSu = -1;
 
-		setTime();
 
 		for (uint32_t v : C[side^1]) {
 #ifdef CALC_DEGREE
@@ -1144,9 +1140,6 @@ void biplex::branchNew(uint32_t dep)
 #endif
 			}
 		}
-
-		getTime(calcTime);
-		setTime();
 
 
 #else	// WITH_PIVOTING	
@@ -1171,23 +1164,17 @@ void biplex::branchNew(uint32_t dep)
 			{
 				biplexUpdateDeg(u, side^1, oldPosC);
 				++result.numBipartiteBranches;				
-				getTime(bipartiteTime);
 				branchNew(dep + 1);
-				setTime();
 				biplexRestoreDeg(u, side^1, oldPosC);
 			}
 		}
 		biplexRestore(u, side^1, oldPosC, oldPosX);
 		if (S[0].size() + C[0].size() >= lb && S[1].size() + C[1].size() >= lb) {
 			++result.numBipartiteBranches;				
-			getTime(bipartiteTime);
 			branchNew(dep + 1);
-			setTime();
 		}
 		biplexBacktrack(u, side^1);
 
-		getTime(bipartiteTime);
-		
 	}
 
 
@@ -1303,8 +1290,6 @@ void biplex::branchNew(uint32_t dep)
 			biplexBacktrack(u, pSide^1);
 		}	
 	}
-
-	if (dep == 0) getTime(pivotingTime);
 
 #ifdef PRUNE_C
 	biplexRestorePruneC(pruneOldPosC);

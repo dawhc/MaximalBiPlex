@@ -2,7 +2,7 @@
 #include "linearheap.hpp"
 #include "graph.hpp"
 #include "vertexset.hpp"
-#include <inttypes.h>
+#include <cinttypes>
 #include <chrono>
 #include <cstdint>
 #include <unordered_map>
@@ -790,8 +790,6 @@ uint32_t biplex::biplexUpperBound(uint32_t u, uint32_t uSide)
 		for (uint32_t w : C[uSide^1]) {
 			if (!G.connect(uSide, u, w)) continue;
 			uint32_t s = nonNbrS[uSide^1][w].size();
-			if (ptrB[s] >= B[s].size())
-				printf("i=%d size=%d\n", ptrB[s], B[s].size());
 			B[s][ptrB[s]++] = w;
 		}
 	}

@@ -23,4 +23,4 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/biplex)
 
 
 add_executable(${EXECUTABLE_FILENAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
-target_link_libraries(${EXECUTABLE_FILENAME} BiPlex BiGraph)
+target_link_libraries(${EXECUTABLE_FILENAME} BiPlex Utils)

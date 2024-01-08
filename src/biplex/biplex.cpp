@@ -1,7 +1,7 @@
 #include "biplex.h"
-#include "linearheap.hpp"
-#include "graph.hpp"
-#include "vertexset.hpp"
+#include "../utils/linearheap.hpp"
+#include "../utils/graph.hpp"
+#include "../utils/vertexset.hpp"
 #include <cinttypes>
 #include <chrono>
 #include <cstdint>
@@ -10,23 +10,17 @@
 #include <vector>
 #include <algorithm>
 #include <queue>
-#include <unordered_set>
 
 
 // #define DEBUG
-#define UPPERBOUND_PRUNE
 // #define CALC_DEGREE
 #define SMALL_K 1
 // #define DESTRUCT_SETS // accelerate dataset "dblp"
 #define PRUNE_C
 #define PRUNE_ONCE
 // #define PRUNE_WITH_QUEUE
-#define WITH_PIVOTING
 // #define ENUM_LARGER_DEGREE_SIDE
-// #define NO_ORDERING
 // #define CHOOSE_FIRST_VERTEX
-#define CORE_REDUCTION
-#define BUTTERFLY_REDUCTION_VERSION 3
 
 #define STRINGIFY(name) #name
 
@@ -48,6 +42,7 @@ namespace biplex {
 	std::vector<uint32_t> sup, ptrB;
 	std::vector<std::vector<uint32_t>> B;
 	uint32_t q, k, lb;
+	bool enableUpperBound, enablePivoting;
 	Result result;
 	uint64_t resultNumThres;
 	std::chrono::time_point<std::chrono::steady_clock> startTime;
@@ -177,8 +172,6 @@ BiGraph biplex::coreReduction(const BiGraph& G, uint32_t alpha, uint32_t beta) {
  * Butterfly-based reduction
  */
 
-#if (BUTTERFLY_REDUCTION_VERSION == 3)
-
 BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k) {
 
 	std::vector<uint32_t> cn(std::max(G.n[0], G.n[1])), deg[2] = {G.degree[0], G.degree[1]};
@@ -229,212 +222,6 @@ BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k) {
 
 }
 
-#elif (BUTTERFLY_REDUCTION_VERSION == 2)
-
-BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k) {
-	std::queue<uint32_t> Q;
-	std::vector<std::pair<uint32_t, uint32_t>> edges;
-	std::vector<std::unordered_map<uint32_t, uint32_t>> eid(G.n[0]);
-	std::vector<bool> inq, del;
-
-	uint32_t threshold = (q-k-1) * (q-2*k-1);
-
-	sup.clear();
-
-	coreOrdering(G);
-	uint32_t maxCore[2] = { core[0][ordered[0][G.n[0]-1]], core[1][ordered[1][G.n[1]-1]] };
-	// printf("maxCore = {%d, %d}\n", maxCore[0], maxCore[1]);
-
-	for (uint32_t u = 0; u < G.n[0]; ++u)  {
-		for (uint32_t v : G.nbr[0][u])  {
-			if (core[0][u] >= std::min(maxCore[0], lb) && core[1][v] >= std::min(maxCore[1], lb)) continue;
-			eid[u][v] = edges.size();
-			edges.push_back(std::make_pair(u, v));
-		}
-	}
-
-	sup.resize(edges.size());
-	inq.resize(edges.size());
-	del.resize(edges.size());
-
-	for (uint32_t i = 0; i < edges.size(); ++i) {
-		inq[i] = del[i] = false;
-		sup[i] = 0;
-
-		uint32_t u = edges[i].first, v = edges[i].second;
-
-		for (uint32_t w : G.nbr[1][v]) if (w != u) 
-			for (uint32_t x : G.nbr[0][w]) if (x != v && G.connect(0, u, x)) 
-				++sup[i];
-
-		if (sup[i] < threshold) {
-			inq[i] = true;
-			Q.push(i);
-		}
-	}
-
-
-	while (!Q.empty()) {
-		uint32_t i = Q.front(); Q.pop();
-		inq[i] = false; del[i] = true;
-		uint32_t u = edges[i].first, v = edges[i].second;
-		for (uint32_t w : G.nbr[1][v]) if (w != u) {
-			auto iwv = eid[w].find(v);
-			if (iwv != eid[w].end() && del[iwv->second]) continue;
-			//if (del[iwv->second]) continue;
-			for (uint32_t x : G.nbr[0][w]) if (x != v && G.connect(0, u, x)) {
-				auto iux = eid[u].find(x);
-				auto iwx = eid[w].find(x);
-				//if (del[iux->second] || del[iwx->second]) continue;
-				 if ((iux != eid[u].end() && del[iux->second]) || 
-				 	(iwx != eid[w].end() && del[iwx->second])) continue;
-				if (iux != eid[u].end() && --sup[iux->second] < threshold && !inq[iux->second]) {
-					inq[iux->second] = true;
-					Q.push(iux->second);
-				}
-				if (iwv != eid[w].end() && --sup[iwv->second] < threshold && !inq[iwv->second]) {
-					inq[iwv->second] = true;
-					Q.push(iwv->second);
-				}
-				if (iwx != eid[w].end() && --sup[iwx->second] < threshold && !inq[iwx->second]) {
-					inq[iwx->second] = true;
-					Q.push(iwx->second);
-				}
-			}
-		}
-	}
-
-	BiGraph newG;
-
-	for (uint32_t u = 0; u < G.n[0]; ++u) {
-		for (uint32_t v : G.nbr[0][u]) {
-			auto iter = eid[u].find(v);
-			if (iter == eid[u].end() || (!del[iter->second]))
-			// if (!del[iter->second])
-				newG.addEdgeWithLabel(G.vLabel[0][u], G.vLabel[1][v]);
-		}
-	}
-
-	std::vector<bool> rmv[2] = {std::vector<bool>(G.n[0]), std::vector<bool>(G.n[1])};
-
-	while (true) {
-		bool flagBreak = true;
-		for (uint32_t i = 0; i <= 1; ++i) {
-			for (uint32_t u = 0; u < newG.n[i]; ++u) {
-				if (!rmv[i][u] && newG.degree[i][u] < q-k) {
-					rmv[i][u] = true;
-					flagBreak = false;
-					for (uint32_t v : newG.nbr[i][u])
-						if (!rmv[i^1][v])
-							--newG.degree[i^1][v];
-				}
-			}
-		}
-		if (flagBreak) break;
-	}
-
-	BiGraph newnewG;
-
-	for (uint32_t u = 0; u < newG.n[0]; ++u) if (!rmv[0][u])
-		for (uint32_t v : newG.nbr[0][u]) if (!rmv[1][v])
-			newnewG.addEdgeWithLabel(newG.vLabel[0][u], newG.vLabel[1][v]);
-
-	return newnewG;
-
-}
-
-#else
-
-BiGraph biplex::butterflyReduction(const BiGraph& G, uint32_t q, uint32_t k) {
-	std::vector<std::pair<uint32_t, uint32_t>> edges;
-	std::vector<std::unordered_map<uint32_t, uint32_t>> eid(G.n[0]);
-
-	uint32_t threshold = (q-k-1) * (q-2*k-1);
-
-	for (uint32_t u = 0; u < G.n[0]; ++u)
-		for (uint32_t v : G.nbr[0][u]) {
-			edges.push_back(std::make_pair(u, v));
-			eid[u][v] = edges.size() - 1;
-		}
-
-	std::vector<uint32_t>(edges.size()).swap(sup);
-
-	for (uint32_t i = 0; i < edges.size(); ++i) {
-		uint32_t u = edges[i].first, v = edges[i].second;
-		for (uint32_t w : G.nbr[1][v]) {
-			if (w == u) continue;
-			for (uint32_t x : G.nbr[0][w]) {
-				if (x == v || !G.connect(0, u, x)) continue;
-				++sup[i];
-			}
-		}
-	}
-
-	LinearHeap<uint32_t> supHeap(sup);
-
-	while (!supHeap.empty()) {
-		uint32_t minSupEid = supHeap.top();
-		if (supHeap[minSupEid] >= threshold) break;
-		supHeap.pop();
-
-		uint32_t u = edges[minSupEid].first, v = edges[minSupEid].second;
-
-		for (uint32_t i = 0; i < G.nbr[1][v].size(); ++i) {
-			uint32_t w = G.nbr[1][v][i], ewv = eid[w][v];
-			if (u == w || !supHeap.inside(ewv)) continue;
-
-			for (uint32_t j = 0; j < G.nbr[0][w].size(); ++j) {
-
-				uint32_t x = G.nbr[0][w][j];
-				if (v == x || !G.connect(0, u, x)) continue;
-				uint32_t eux = eid[u][x], ewx = eid[w][x];
-				if (!supHeap.inside(eux) || !supHeap.inside(ewx)) continue;
-
-				supHeap.dec(eux);
-				supHeap.dec(ewv);
-				supHeap.dec(ewx);
-			}
-		}
-	}
-
-	BiGraph newG;
-
-	while (!supHeap.empty()) {
-		uint32_t t = supHeap.top(); supHeap.pop();	
-		newG.addEdgeWithLabel(
-			G.vLabel[0][edges[t].first], 
-			G.vLabel[1][edges[t].second]
-		);
-	}
-
-	std::vector<bool> rmv[2] = {std::vector<bool>(G.n[0]), std::vector<bool>(G.n[1])};
-
-	while (true) {
-		bool flagBreak = true;
-		for (uint32_t i = 0; i <= 1; ++i) {
-			for (uint32_t u = 0; u < newG.n[i]; ++u) {
-				if (!rmv[i][u] && newG.degree[i][u] < q-k) {
-					rmv[i][u] = true;
-					flagBreak = false;
-					for (uint32_t v : newG.nbr[i][u])
-						if (!rmv[i^1][v])
-							--newG.degree[i^1][v];
-				}
-			}
-		}
-		if (flagBreak) break;
-	}
-
-	BiGraph newnewG;
-
-	for (uint32_t u = 0; u < newG.n[0]; ++u) if (!rmv[0][u])
-		for (uint32_t v : newG.nbr[0][u]) if (!rmv[1][v])
-			newnewG.addEdgeWithLabel(newG.vLabel[0][u], newG.vLabel[1][v]);
-
-	return newnewG;
-}
-
-#endif
 
 bool biplex::pruneCX(uint32_t u, uint32_t uSide) {
 
@@ -627,30 +414,27 @@ void biplex::destructSets(uint32_t u, uint32_t uSide) {
 /**
  * Enumeration algorithm
  */
-biplex::Result biplex::enumeration(const BiGraph& Graph, uint32_t q, uint32_t k, uint64_t resultNum) 
+biplex::Result biplex::run(const BiGraph& Graph, uint32_t q, uint32_t k, uint64_t resultNum, 
+	bool flagUpperBound, bool flagPivoting, bool flagCoreReduction, bool flagButterflyReduction, bool flagOrdering) 
 {
 	biplex::q = q;
 	biplex::k = k;
 	biplex::lb = q;// std::max(biplexLowerBound(Graph), q);
 	biplex::resultNumThres = resultNum;
+	biplex::enableUpperBound = flagUpperBound;
+	biplex::enablePivoting = flagPivoting;
 
 	printf("\nMacro Info:\n");
 	PRINT_MACRO_INFO(DEBUG);
 	PRINT_MACRO_INFO(CALC_DEGREE);
-	PRINT_MACRO_INFO(WITH_PIVOTING);
 	PRINT_MACRO_INFO(ENUM_LARGER_DEGREE_SIDE);
-	PRINT_MACRO_INFO(UPPERBOUND_PRUNE);
 	PRINT_MACRO_INFO(DESTRUCT_SETS);
 	PRINT_MACRO_INFO(NO_ORDERING);
 	PRINT_MACRO_INFO(PRUNE_C);
 	PRINT_MACRO_INFO(CHOOSE_FIRST_VERTEX);
 
 
-#ifdef CORE_REDUCTION
-	if (lb > k)	{
-#else
-	if (false) {
-#endif
+	if (flagCoreReduction && lb > k) {
 		// Get the (lb-k, lb-k)-core from G
 		printf("\nStart core reduction\n");
 		printf("Before: m = %d, nL = %d, nR = %d\n", Graph.m, Graph.n[0], Graph.n[1]);
@@ -677,9 +461,8 @@ biplex::Result biplex::enumeration(const BiGraph& Graph, uint32_t q, uint32_t k,
 	}
 
 	result.numBranches = result.numBiPlexes = 0;
-#ifdef BUTTERFLY_REDUCTION_VERSION
 	// Butterfly-based reduction
-	if (lb > 2 * k) {
+	if (flagButterflyReduction && lb > 2 * k) {
 		printf("\nStart butterfly reduction\n");
 		printf("Before: m = %d, nL = %d, nR = %d\n", G.m, G.n[0], G.n[1]);
 		auto startTime = std::chrono::steady_clock::now();
@@ -688,13 +471,8 @@ biplex::Result biplex::enumeration(const BiGraph& Graph, uint32_t q, uint32_t k,
 		printf("After: m = %d, nL = %d, nR = %d\n", G.m, G.n[0], G.n[1]);
 		printf("Time spent for butterfly reduction: %ld ms\n", duration.count());
 	}
-#endif
 
-#ifdef NO_ORDERING
-	if (true) {
-#else
-	if (lb <= 2 * k) {
-#endif
+	if (!flagOrdering || lb <= 2 * k) {
 		for (uint32_t side = 0; side <= 1; ++side) {
 
 			std::vector<std::vector<uint32_t>>(G.n[side]).swap(nonNbrS[side]);
@@ -1075,78 +853,70 @@ void biplex::branchNew(uint32_t dep)
 		}
 	}
 
-#ifndef WITH_PIVOTING
+	if (!enablePivoting) {
 
-	for (uint32_t side = 0; side <= 1; ++side) {
-		for (uint32_t u : C[side]) {
+		for (uint32_t side = 0; side <= 1; ++side) {
+			for (uint32_t u : C[side]) {
 #ifdef CALC_DEGREE
-			degC[side][u] = calcDegree(C, u, side);
+				degC[side][u] = calcDegree(C, u, side);
 #endif
-			int32_t nonDegU = C[side^1].size() - degC[side][u] + nonNbrS[side][u].size();
-			if (nonDegU > nonDegPInC[side]) {
-				nonDegPInC[side] = nonDegU;
-				Cp[side] = u;
+				int32_t nonDegU = C[side^1].size() - degC[side][u] + nonNbrS[side][u].size();
+				if (nonDegU > nonDegPInC[side]) {
+					nonDegPInC[side] = nonDegU;
+					Cp[side] = u;
+				}
 			}
 		}
-	}
 
-	// maximum non-degree of vertices in G[S & C] < k
-	if (std::max(nonDegPInC[0], nonDegPInS[0]) <= (int32_t)k && 
-		std::max(nonDegPInC[1], nonDegPInS[1]) <= (int32_t)k &&
-		X[0].size() == 0 && X[1].size() == 0) {
-		++result.numBiPlexes;
+		// maximum non-degree of vertices in G[S & C] < k
+		if (std::max(nonDegPInC[0], nonDegPInS[0]) <= (int32_t)k && 
+			std::max(nonDegPInC[1], nonDegPInS[1]) <= (int32_t)k &&
+			X[0].size() == 0 && X[1].size() == 0) {
+			++result.numBiPlexes;
 #ifdef DEBUG
-		printf("*** find: No.%d\n", result.numBiPlexes);
+			printf("*** find: No.%d\n", result.numBiPlexes);
 #endif
 #ifdef PRUNE_C
-		biplexRestorePruneC(pruneOldPosC);
+			biplexRestorePruneC(pruneOldPosC);
 #endif
-		return;
-	}
-
-
+			return;
+		}
+	}	
 	
-	
-
-#endif // WITH_PIVOTING
 
 
 	// ********************************** Bipartite **********************************
-#ifdef WITH_PIVOTING
 
-	if (nonDegPInS[0] > (int32_t)k || nonDegPInS[1] > (int32_t)k) {
-		
+	if (!enablePivoting || (nonDegPInS[0] > (int32_t)k || nonDegPInS[1] > (int32_t)k)) {
 
-		uint32_t side = nonDegPInS[0] > nonDegPInS[1] ? 0 : 1;
+		uint32_t side = 0, u = -1;
 
-		uint32_t u = -1;
-		int32_t deg_u = G.n[side], nonDegSu = -1;
+		if (enablePivoting) {
+
+			side = nonDegPInS[0] > nonDegPInS[1] ? 0 : 1;
+			u = -1;
+			int32_t deg_u = G.n[side], nonDegSu = -1;
 
 
-		for (uint32_t v : C[side^1]) {
-#ifdef CALC_DEGREE
-			// degC[side^1][v] = calcDegree(C, v, side^1);
-#endif
-			int32_t nonDegSv = nonNbrS[side^1][v].size();
-			int32_t deg_v = degC[side^1][v] + S[side].size() - nonDegSv;
-			if (((deg_v < deg_u) || (deg_v == deg_u && nonDegSv > nonDegSu)) && !G.connect(side, Sp[side], v))  {
-				u = v;
-				deg_u = deg_v;
-				nonDegSu = nonDegSv;
+			for (uint32_t v : C[side^1]) {
+
+				int32_t nonDegSv = nonNbrS[side^1][v].size();
+				int32_t deg_v = degC[side^1][v] + S[side].size() - nonDegSv;
+				if (((deg_v < deg_u) || (deg_v == deg_u && nonDegSv > nonDegSu)) && !G.connect(side, Sp[side], v))  {
+					u = v;
+					deg_u = deg_v;
+					nonDegSu = nonDegSv;
 #ifdef CHOOSE_FIRST_VERTEX
-				break;
+					break;
 #endif
+				}
 			}
 		}
 
-
-#else	// WITH_PIVOTING	
-	if (true) {
-
-		uint32_t side = S[1].size() + C[1].size() - nonDegPInC[0] < S[0].size() + C[0].size() - nonDegPInC[1] ? 1 : 0;
-		uint32_t u = Cp[side^1];
-
-#endif	// WITH_PIVOTING
+		else {
+			side = S[1].size() + C[1].size() - nonDegPInC[0] < S[0].size() + C[0].size() - nonDegPInC[1] ? 1 : 0;
+			u = Cp[side^1];
+		}
 
 #ifdef DEBUG
 		printf("Bipartite: %d%c\n", G.vLabel[side^1][u], side^1 ? 'R' : 'L');
@@ -1156,10 +926,7 @@ void biplex::branchNew(uint32_t dep)
 		assert(u != -1u);
 		biplexUpdate(u, side^1, oldPosC, oldPosX);
 		if (S[0].size() + C[0].size() >= lb && S[1].size() + C[1].size() >= lb) {
-#ifdef UPPERBOUND_PRUNE
-			if (biplexUpperBound(u, side^1) >= lb) 
-#endif
-			{
+			if (!enableUpperBound || biplexUpperBound(u, side^1) >= lb) {
 				biplexUpdateDeg(u, side^1, oldPosC);
 				++result.numBipartiteBranches;				
 				branchNew(dep + 1);
@@ -1175,8 +942,6 @@ void biplex::branchNew(uint32_t dep)
 
 	}
 
-
-		
 
 
 	// ********************************** Pivoting **********************************
@@ -1252,10 +1017,7 @@ void biplex::branchNew(uint32_t dep)
 
 			biplexUpdate(u, pSide^1, oldPosC, oldPosX);
 			if (S[0].size() + C[0].size() >= lb && S[1].size() + C[1].size() >= lb) {
-#ifdef UPPERBOUND_PRUNE
-				if (biplexUpperBound(u, pSide^1) >= lb)
-#endif
-				{
+				if (!enableUpperBound || biplexUpperBound(u, pSide^1) >= lb) {
 					++result.numPivotingBranches;
 					biplexUpdateDeg(u, pSide^1, oldPosC);
 					branchNew(dep + 1);
@@ -1269,10 +1031,7 @@ void biplex::branchNew(uint32_t dep)
 		if (C[pSide].inside(pivot)) {
 			biplexUpdate(pivot, pSide, oldPosC, oldPosX);
 			if (S[0].size() + C[0].size() >= lb && S[1].size() + C[1].size() >= lb) {
-#ifdef UPPERBOUND_PRUNE
-				if (biplexUpperBound(pivot, pSide) >= lb)
-#endif
-				{
+				if (!enableUpperBound || biplexUpperBound(pivot, pSide) >= lb) {
 					++result.numPivotingBranches;
 					biplexUpdateDeg(pivot, pSide, oldPosC);
 					branchNew(dep + 1);

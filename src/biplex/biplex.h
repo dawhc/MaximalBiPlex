@@ -1,9 +1,9 @@
 #ifndef BIPLEX_H
 #define BIPLEX_H
 
-#include "bigraph.hpp"
-#include "vertexset.hpp"
-#include "hash.hpp"
+#include "../utils/bigraph.hpp"
+#include "../utils/vertexset.hpp"
+#include "../utils/hash.hpp"
 #include <cstdint>
 #include <vector>
 
@@ -25,7 +25,8 @@ namespace biplex {
 
 	void destructSets(uint32_t u, uint32_t uSide);
 
-	Result enumeration(const BiGraph& G, uint32_t q, uint32_t k, uint64_t resultNum);
+	Result run(const BiGraph& G, uint32_t q, uint32_t k, uint64_t resultNum, 
+		bool flagUpperBound=true, bool flagPivoting=true, bool flagCoreReduction=true, bool flagButterflyReduction=true, bool flagOrdering=true);
 
 	//uint32_t biplexLowerBound(const BiGraph& G);
 

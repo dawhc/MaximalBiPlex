@@ -37,8 +37,3 @@ bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 -a BPBnB # BPBnBNU
 bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 --no-butterfly-reduction # BPPivotC
 bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 --no-ordering # BPPivotNO
 ```
-
-- How to choose algorithm:
-
-> Comment out (or delete) the macro `#define WITH_PIVOTING ` in `src/biplex/biplex.cpp` to modify the algorithm from $BPPivot$ to $BPBnB$.
-

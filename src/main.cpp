@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
 		G, 
 		args.get<int>("lb"),
 		args.get<int>("key"),
-		args.get<long long>("num"),
+		args.get<unsigned long long>("num"),
 		!args.exist("no-upperbound"),
 		args.get<std::string>("algo") == "BPPivot",
 		!args.exist("no-core-reduction"),

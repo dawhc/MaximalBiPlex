@@ -20,3 +20,5 @@ dataset
 docs
 .cache
 sftp-config.json
+bin
+*.a

@@ -16,9 +16,9 @@ int main(int argc, char* argv[]) {
 	args.add<std::string>("data", 'd', "dataset path", true);
 	args.add<int>("lb", 'q', "size lowerbound", true);
 	args.add<int>("key", 'k', "value of k", true);
-	args.add<std::string>("algo", 'a', "algorithm", false, "BPPivot", cmdline::oneof<std::string>("BPPivot", "BPBnB"));
 	args.add<unsigned long long>("num", 'n', "number of result", false, RESULT_MAXNUM);
 	args.add("no-upperbound", 0, "disable upperbound pruning");
+	args.add("no-pivoting", 0, "disable pivoting technique");
 	args.add("no-core-reduction", 0, "disable core reduction");
 	args.add("no-butterfly-reduction", 0, "disable butterfly reduction");
 	args.add("no-ordering", 0, "disable ordering");
@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
 		args.get<int>("key"),
 		args.get<unsigned long long>("num"),
 		!args.exist("no-upperbound"),
-		args.get<std::string>("algo") == "BPPivot",
+		!args.exist("no-pivoting"),
 		!args.exist("no-core-reduction"),
 		!args.exist("no-butterfly-reduction"),
 		!args.exist("no-ordering")

@@ -17,6 +17,5 @@ result*
 test*
 *.out
 dataset
-docs
 .cache
 sftp-config.json

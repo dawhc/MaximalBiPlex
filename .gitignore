@@ -19,3 +19,5 @@ test*
 dataset
 .cache
 sftp-config.json
+bin
+*.a

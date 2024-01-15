@@ -31,8 +31,9 @@ options:
 - Example:
 
 ```bash
-bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 # BPPivot
-bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 -a BPBnB # BPBnBNU
-bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 --no-butterfly-reduction # BPPivotC
-bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 --no-ordering # BPPivotNO
+bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1                                 # BPPivot
+bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 --no-pivoting                   # BPBnB
+bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 --no-pivoting --no-upperbound   # BPBnBNU
+bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 --no-butterfly-reduction        # BPPivotC
+bin/run -d datas/opsahl_ucforum.txt -q 3 -k 1 --no-ordering                   # BPPivotNO
 ```

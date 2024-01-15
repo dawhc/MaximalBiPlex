@@ -18,7 +18,7 @@ int main(int argc, char* argv[]) {
 	args.add<int>("key", 'k', "value of k", true);
 	args.add<unsigned long long>("num", 'n', "number of result", false, RESULT_MAXNUM);
 	args.add("no-upperbound", 0, "disable upperbound pruning");
-	args.add("no-pivoting", 0, "disable pivoting technique");
+	args.add("no-pivoting", 0, "disable pivoting (i.e. using algorithm BPBnB instead of BPPivot)");
 	args.add("no-core-reduction", 0, "disable core reduction");
 	args.add("no-butterfly-reduction", 0, "disable butterfly reduction");
 	args.add("no-ordering", 0, "disable ordering");

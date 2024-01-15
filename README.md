@@ -14,13 +14,13 @@ cmake . && make
 ```bash
 bin/run -d <dataset> -q <size> -k <k> [options]
 
-usage: bin/run --data=string --lb=int --key=int [options] ...
+usage: bin/run -d=string -q=int -k=int [options] ...
 options:
   -d, --data                      dataset path (string)
   -q, --lb                        size lowerbound (int)
   -k, --key                       value of k (int)
-  -a, --algo                      algorithm (string [=BPPivot])
-  -n, --num                       number of result (long long [=18446744073709551615])
+  -n, --num                       number of result (unsigned long long [=18446744073709551615])
+      --no-pivoting               disable pivoting (i.e. using algorithm BPBnB instead of BPPivot)
       --no-upperbound             disable upperbound pruning
       --no-core-reduction         disable core reduction
       --no-butterfly-reduction    disable butterfly reduction
@@ -28,7 +28,6 @@ options:
   -h, --help                      print this message
 
 ```
-> Available algorithms: BPPivot / BPBnB
 - Example:
 
 ```bash
